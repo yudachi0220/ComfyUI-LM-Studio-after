@@ -61,6 +61,12 @@ class LMStudioNode:
                     "max": 4096,
                     "step": 1
                 }),
+                "seed": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 0xffffffffffffffff,
+                    "display": "number"
+                }),
                 "thinking_tokens": ("BOOLEAN", {
                     "default": True,
                     "label": "Include thinking tokens"
@@ -117,7 +123,7 @@ class LMStudioNode:
 
     def get_response(self, system_prompt: str, user_message: str, model_id: str, 
                     server_address: str, temperature: float, max_tokens: int,
-                    thinking_tokens: bool, use_sdk: bool = True, 
+                    seed: int, thinking_tokens: bool, use_sdk: bool = True, 
                     image: Optional[np.ndarray] = None, debug: bool = False) -> Tuple[str, str]:
         """Main entry point for getting LM Studio response"""
         
@@ -138,18 +144,18 @@ class LMStudioNode:
         if HAS_SDK and use_sdk:
             return self._get_response_sdk(
                 system_prompt, user_message, model_id, temperature, 
-                max_tokens, thinking_tokens, image, debug
+                max_tokens, seed, thinking_tokens, image, debug
             )
         else:
             if image is not None and debug:
                 print("Warning: Image input is not supported with API mode. Install LM Studio SDK for image support.")
             return self._get_response_api(
                 system_prompt, user_message, model_id, server_address, 
-                temperature, thinking_tokens, debug
+                temperature, seed, thinking_tokens, debug
             )
 
     def _get_response_sdk(self, system_prompt: str, user_message: str, model_id: str,
-                         temperature: float, max_tokens: int, thinking_tokens: bool,
+                         temperature: float, max_tokens: int, seed: int, thinking_tokens: bool,
                          image: Optional[np.ndarray] = None, debug: bool = False) -> Tuple[str, str]:
         """Use the LM Studio SDK to get a response"""
         temp_path = None
@@ -183,6 +189,7 @@ class LMStudioNode:
             config = {
                 "temperature": temperature,
                 "maxTokens": max_tokens,
+                "seed": seed,
             }
             
             if debug:
@@ -221,7 +228,7 @@ class LMStudioNode:
                     print(f"Debug: Removed temporary file: {temp_path}")
 
     def _get_response_api(self, system_prompt: str, user_message: str, model_id: str,
-                         server_address: str, temperature: float, thinking_tokens: bool,
+                         server_address: str, temperature: float, seed: int, thinking_tokens: bool,
                          debug: bool = False) -> Tuple[str, str]:
         """Use the LM Studio API to get a response (text-only)"""
         headers = {"Content-Type": "application/json"}
@@ -233,6 +240,7 @@ class LMStudioNode:
                 {"role": "user", "content": user_message}
             ],
             "temperature": temperature,
+            "seed": seed,
             "stream": False
         }
 
@@ -272,11 +280,93 @@ class LMStudioNode:
             return (f"Error: {str(e)}", self.default_stats)
 
 
+class LMStudioUnloadNode:
+    """Node to unload a model from LM Studio, freeing VRAM/resources."""
+    
+    def __init__(self):
+        pass
+    
+    @classmethod
+    def INPUT_TYPES(cls) -> Dict[str, Any]:
+        return {
+            "required": {
+                "server_address": ("STRING", {
+                    "multiline": False,
+                    "default": "http://127.0.0.1:1234"
+                }),
+                "model_id": ("STRING", {
+                    "multiline": False,
+                    "default": ""
+                }),
+                "use_sdk": ("BOOLEAN", {
+                    "default": True,
+                    "label": "Use SDK (if available)"
+                }),
+            }
+        }
+    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("status",)
+    FUNCTION = "unload_model"
+    CATEGORY = "LM Studio"
+    
+    def unload_model(self, server_address: str, model_id: str, 
+                     use_sdk: bool = True) -> Tuple[str]:
+        """Unload a model from LM Studio memory."""
+        
+        if HAS_SDK and use_sdk:
+            return self._unload_sdk(model_id)
+        else:
+            return self._unload_api(server_address, model_id)
+    
+    def _unload_sdk(self, model_id: str) -> Tuple[str]:
+        """Unload via LM Studio SDK."""
+        try:
+            if model_id:
+                model = lms.llm(model_id)
+            else:
+                model = lms.llm()
+            model.unload()
+            return (f"Model unloaded successfully: {model_id or 'current model'}",)
+        except Exception as e:
+            return (f"SDK unload error: {str(e)}",)
+    
+    def _unload_api(self, server_address: str, model_id: str) -> Tuple[str]:
+        """Unload via LM Studio REST API."""
+        try:
+            payload = {}
+            if model_id:
+                payload["instance_id"] = model_id
+            
+            response = requests.post(
+                f"{server_address}/api/v1/models/unload",
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                instance = result.get("instance_id", model_id or "all models")
+                return (f"Model unloaded successfully: {instance}",)
+            else:
+                return (f"Unload failed: HTTP {response.status_code} - {response.text}",)
+                
+        except requests.ConnectionError:
+            return (f"Connection error - is LM Studio running at {server_address}?",)
+        except requests.Timeout:
+            return ("Request timed out during unload",)
+        except Exception as e:
+            return (f"Unload error: {str(e)}",)
+
+
 # Node registration
 NODE_CLASS_MAPPINGS = {
-    "LMStudioNode": LMStudioNode
+    "LMStudioNode": LMStudioNode,
+    "LMStudioUnloadNode": LMStudioUnloadNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "LMStudioNode": "LM Studio Chat Interface"
+    "LMStudioNode": "LM Studio Chat Interface",
+    "LMStudioUnloadNode": "LM Studio Unload Model"
 }

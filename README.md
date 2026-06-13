@@ -11,7 +11,9 @@ A powerful ComfyUI custom node that seamlessly integrates LM Studio's local lang
 - **Vision Model Support**: Process images alongside text prompts with compatible models
 - **Real-time Statistics**: Monitor tokens per second, input/output token counts
 - **Thinking Tokens**: Optional support for models that use thinking tokens
-- **Flexible Configuration**: Adjust temperature, max tokens, and server settings
+- **Flexible Configuration**: Adjust temperature, max tokens, seed, and server settings
+- **Random Seed Support**: Control reproducibility with seed parameter (0 = random)
+- **Model Unloading**: Dedicated node to free VRAM by unloading models from memory
 - **Debug Mode**: Built-in debugging for troubleshooting
 
 ## Installation
@@ -74,7 +76,20 @@ For models that support vision (like LLaVA):
 
 - **Use SDK**: Enable for better performance and image support (requires `lmstudio` package)
 - **Include Thinking Tokens**: For models that support chain-of-thought reasoning
+- **Seed**: Set a specific seed for reproducible outputs (0 lets LM Studio use random seed)
 - **Debug Mode**: Enable to see detailed processing information
+
+### Model Unload Node
+
+Use the "LM Studio Unload Model" node to free VRAM when you're done with inference:
+
+1. Add the "LM Studio Unload Model" node to your workflow
+2. Configure:
+   - **Server Address**: Same as your chat node (default: `http://127.0.0.1:1234`)
+   - **Model ID**: Leave empty to unload the current model, or specify a model ID
+   - **Use SDK**: Enable if SDK is installed (recommended)
+
+The node outputs a status string confirming the unload result.
 
 ## Example Workflow
 
