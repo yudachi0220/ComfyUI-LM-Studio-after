@@ -5,6 +5,7 @@ import os
 import tempfile
 import time
 import numpy as np
+from urllib.parse import urlparse
 from PIL import Image
 from typing import Optional, Dict, Tuple, Any
 
@@ -75,6 +76,10 @@ class LMStudioNode:
                     "default": True,
                     "label": "Use SDK (if available)"
                 }),
+                "unload_after_use": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Unload the model after processing to free VRAM"
+                }),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -123,7 +128,8 @@ class LMStudioNode:
 
     def get_response(self, system_prompt: str, user_message: str, model_id: str, 
                     server_address: str, temperature: float, max_tokens: int,
-                    seed: int, thinking_tokens: bool, use_sdk: bool = True, 
+                    seed: int, thinking_tokens: bool, use_sdk: bool = True,
+                    unload_after_use: bool = False,
                     image: Optional[np.ndarray] = None, debug: bool = False) -> Tuple[str, str]:
         """Main entry point for getting LM Studio response"""
         
@@ -142,17 +148,25 @@ class LMStudioNode:
 
         # Route to appropriate method
         if HAS_SDK and use_sdk:
-            return self._get_response_sdk(
+            result = self._get_response_sdk(
                 system_prompt, user_message, model_id, temperature, 
                 max_tokens, seed, thinking_tokens, image, debug
             )
         else:
             if image is not None and debug:
                 print("Warning: Image input is not supported with API mode. Install LM Studio SDK for image support.")
-            return self._get_response_api(
+            result = self._get_response_api(
                 system_prompt, user_message, model_id, server_address, 
                 temperature, seed, thinking_tokens, debug
             )
+        
+        # Unload model after use if requested (Pirogs-Nodes style)
+        if unload_after_use and model_id:
+            if debug:
+                print(f"Debug: Unloading model after use: {model_id}")
+            self._unload_model(server_address, model_id)
+        
+        return result
 
     def _get_response_sdk(self, system_prompt: str, user_message: str, model_id: str,
                          temperature: float, max_tokens: int, seed: int, thinking_tokens: bool,
@@ -279,6 +293,22 @@ class LMStudioNode:
         except Exception as e:
             return (f"Error: {str(e)}", self.default_stats)
 
+    def _unload_model(self, server_address: str, model_name: str) -> bool:
+        """Unload model using LM Studio SDK (Pirogs-Nodes style)."""
+        if not HAS_SDK:
+            print(f"Cannot unload model {model_name}: LM Studio SDK not available. Install with: pip install lmstudio")
+            return False
+        try:
+            parsed_url = urlparse(server_address)
+            api_host = f"{parsed_url.hostname}:{parsed_url.port}"
+            client = lms.Client(api_host=api_host)
+            client.llm.unload(model_name)
+            print(f"Successfully unloaded model via SDK: {model_name}")
+            return True
+        except Exception as e:
+            print(f"SDK unload failed for {model_name}: {e}")
+            return False
+
 
 class LMStudioUnloadNode:
     """Node to unload a model from LM Studio, freeing VRAM/resources."""
@@ -315,18 +345,22 @@ class LMStudioUnloadNode:
         """Unload a model from LM Studio memory."""
         
         if HAS_SDK and use_sdk:
-            return self._unload_sdk(model_id)
+            return self._unload_sdk(server_address, model_id)
         else:
             return self._unload_api(server_address, model_id)
     
-    def _unload_sdk(self, model_id: str) -> Tuple[str]:
-        """Unload via LM Studio SDK."""
+    def _unload_sdk(self, server_address: str, model_id: str) -> Tuple[str]:
+        """Unload via LM Studio SDK (Pirogs-Nodes style Client pattern)."""
+        if not HAS_SDK:
+            return ("LM Studio SDK not available. Install with: pip install lmstudio",)
         try:
+            parsed_url = urlparse(server_address)
+            api_host = f"{parsed_url.hostname}:{parsed_url.port}"
+            client = lms.Client(api_host=api_host)
             if model_id:
-                model = lms.llm(model_id)
+                client.llm.unload(model_id)
             else:
-                model = lms.llm()
-            model.unload()
+                client.llm.unload()
             return (f"Model unloaded successfully: {model_id or 'current model'}",)
         except Exception as e:
             return (f"SDK unload error: {str(e)}",)
