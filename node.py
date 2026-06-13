@@ -58,7 +58,7 @@ class LMStudioNode:
                 "max_tokens": ("INT", {
                     "default": 1000,
                     "min": 1,
-                    "max": 4096,
+                    "max": 256000,
                     "step": 1
                 }),
                 "seed": ("INT", {
